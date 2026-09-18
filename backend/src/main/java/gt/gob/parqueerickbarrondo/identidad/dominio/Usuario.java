@@ -1,6 +1,7 @@
 package gt.gob.parqueerickbarrondo.identidad.dominio;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -33,6 +34,27 @@ public class Usuario {
 
     @Column(name = "Apellido", nullable = false, length = 80)
     private String apellido;
+
+    @Column(name = "Dpi", length = 13)
+    private String dpi;
+
+    @Column(name = "Celular", length = 8)
+    private String celular;
+
+    @Column(name = "FechaNacimiento")
+    private LocalDate fechaNacimiento;
+
+    @Column(name = "DpiExtendidoEn", length = 120)
+    private String dpiExtendidoEn;
+
+    @Column(name = "Telefono", length = 24)
+    private String telefono;
+
+    @Column(name = "Direccion", length = 300)
+    private String direccion;
+
+    @Column(name = "ClaveFotoPerfil", length = 200)
+    private String claveFotoPerfil;
 
     @Column(name = "HashContrasena", nullable = false, length = 255)
     private String hashContrasena;
@@ -79,16 +101,32 @@ public class Usuario {
             String apellido,
             String hashContrasena,
             Instant terminosAceptadosEn) {
+        this(correoNormalizado, nombre, apellido, hashContrasena, terminosAceptadosEn,
+                null, null, null);
+    }
+
+    public Usuario(
+            String correoNormalizado,
+            String nombre,
+            String apellido,
+            String hashContrasena,
+            Instant terminosAceptadosEn,
+            String dpi,
+            String celular,
+            LocalDate fechaNacimiento) {
         var ahora = Instant.now();
         this.correoNormalizado = correoNormalizado;
         this.nombre = nombre;
         this.apellido = apellido;
+        this.dpi = dpi;
+        this.celular = celular;
+        this.fechaNacimiento = fechaNacimiento;
         this.hashContrasena = hashContrasena;
         this.estado = "ACTIVO";
         this.terminosAceptadosEn = terminosAceptadosEn;
         this.creadoEn = ahora;
         this.actualizadoEn = ahora;
-        this.version = 0L;
+        this.version = null;
     }
 
     public Long obtenerIdUsuario() {
@@ -105,6 +143,34 @@ public class Usuario {
 
     public String obtenerApellido() {
         return apellido;
+    }
+
+    public String obtenerDpi() {
+        return dpi;
+    }
+
+    public String obtenerCelular() {
+        return celular;
+    }
+
+    public LocalDate obtenerFechaNacimiento() {
+        return fechaNacimiento;
+    }
+
+    public String obtenerDpiExtendidoEn() {
+        return dpiExtendidoEn;
+    }
+
+    public String obtenerTelefono() {
+        return telefono;
+    }
+
+    public String obtenerDireccion() {
+        return direccion;
+    }
+
+    public String obtenerClaveFotoPerfil() {
+        return claveFotoPerfil;
     }
 
     public String obtenerHashContrasena() {
@@ -139,6 +205,25 @@ public class Usuario {
         return "ACTIVO".equals(estado);
     }
 
+    public boolean estaPendienteDeVerificacion() {
+        return "PENDIENTEVERIFICACION".equals(estado);
+    }
+
+    public void requerirVerificacionCorreo() {
+        estado = "PENDIENTEVERIFICACION";
+        correoVerificadoEn = null;
+        actualizadoEn = Instant.now();
+    }
+
+    public void confirmarCorreo(Instant fecha) {
+        if (!estaPendienteDeVerificacion()) {
+            throw new IllegalStateException("La cuenta no está pendiente de verificación.");
+        }
+        estado = "ACTIVO";
+        correoVerificadoEn = fecha;
+        actualizadoEn = fecha;
+    }
+
     public void agregarRol(Rol rol) {
         roles.add(rol);
         actualizadoEn = Instant.now();
@@ -158,5 +243,32 @@ public class Usuario {
     public void cambiarContrasena(String nuevoHash) {
         hashContrasena = nuevoHash;
         actualizadoEn = Instant.now();
+    }
+
+    public void actualizarPerfil(
+            String nombre,
+            String apellido,
+            String celular,
+            LocalDate fechaNacimiento,
+            String dpiExtendidoEn,
+            String telefono,
+            String direccion) {
+        this.nombre = nombre.strip();
+        this.apellido = apellido.strip();
+        this.celular = celular.strip();
+        this.fechaNacimiento = fechaNacimiento;
+        this.dpiExtendidoEn = dpiExtendidoEn.strip();
+        this.telefono = normalizarOpcional(telefono);
+        this.direccion = normalizarOpcional(direccion);
+        actualizadoEn = Instant.now();
+    }
+
+    public void cambiarFotoPerfil(String nuevaClave) {
+        claveFotoPerfil = normalizarOpcional(nuevaClave);
+        actualizadoEn = Instant.now();
+    }
+
+    private String normalizarOpcional(String valor) {
+        return valor == null || valor.isBlank() ? null : valor.strip();
     }
 }

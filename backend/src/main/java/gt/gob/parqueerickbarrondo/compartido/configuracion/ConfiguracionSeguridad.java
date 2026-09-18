@@ -1,10 +1,8 @@
 package gt.gob.parqueerickbarrondo.compartido.configuracion;
 
-import java.nio.charset.StandardCharsets;
-
+import gt.gob.parqueerickbarrondo.compartido.api.ManejadorErroresSeguridad;
 import gt.gob.parqueerickbarrondo.identidad.seguridad.ManejadorCierreSesion;
 import gt.gob.parqueerickbarrondo.identidad.seguridad.ServicioDetallesUsuario;
-import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -68,7 +66,8 @@ public class ConfiguracionSeguridad {
             HttpSecurity seguridadHttp,
             SecurityContextRepository repositorioContextoSeguridad,
             SessionRegistry registroSesiones,
-            ManejadorCierreSesion manejadorCierreSesion) throws Exception {
+            ManejadorCierreSesion manejadorCierreSesion,
+            ManejadorErroresSeguridad manejadorErroresSeguridad) throws Exception {
         var repositorioCsrf = CookieCsrfTokenRepository.withHttpOnlyFalse();
         repositorioCsrf.setCookiePath("/");
 
@@ -81,7 +80,9 @@ public class ConfiguracionSeguridad {
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
                         .sessionFixation(fijacion -> fijacion.changeSessionId())
                         .maximumSessions(-1)
-                        .sessionRegistry(registroSesiones))
+                        .sessionRegistry(registroSesiones)
+                        .expiredSessionStrategy(evento -> manejadorErroresSeguridad.responderAutenticacionRequerida(
+                                evento.getRequest(), evento.getResponse())))
                 .authorizeHttpRequests(autorizacion -> autorizacion
                         .requestMatchers(
                                 "/api/v1/sistema/estado",
@@ -90,13 +91,28 @@ public class ConfiguracionSeguridad {
                                 "/api/v1/swagger-ui/**",
                                 "/swagger-ui/**")
                         .permitAll()
+                        .requestMatchers(
+                                "/actuator/info",
+                                "/actuator/metrics/**",
+                                "/actuator/prometheus")
+                        .hasAuthority("REPORTELEER")
                         .requestMatchers(HttpMethod.GET, "/api/v1/autenticacion/csrf")
+                        .permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/publico/**")
                         .permitAll()
                         .requestMatchers(HttpMethod.POST,
                                 "/api/v1/autenticacion/registro",
-                                "/api/v1/autenticacion/iniciar-sesion")
+                                "/api/v1/autenticacion/iniciar-sesion",
+                                "/api/v1/autenticacion/confirmar-correo",
+                                "/api/v1/autenticacion/reenviar-verificacion",
+                                "/api/v1/autenticacion/recuperar-contrasena",
+                                "/api/v1/autenticacion/restablecer-contrasena")
                         .permitAll()
-                        .requestMatchers("/api/v1/autenticacion/**", "/api/v1/administracion/**")
+                        .requestMatchers(
+                                "/api/v1/autenticacion/**",
+                                "/api/v1/administracion/**",
+                                "/api/v1/eventos/**",
+                                "/api/v1/solicitudes/**")
                         .authenticated()
                         .anyRequest().denyAll())
                 .logout(cierre -> cierre
@@ -106,36 +122,29 @@ public class ConfiguracionSeguridad {
                         .deleteCookies("JSESSIONID", "XSRF-TOKEN")
                         .logoutSuccessHandler(manejadorCierreSesion))
                 .exceptionHandling(errores -> errores
-                        .authenticationEntryPoint((peticion, respuesta, excepcion) -> escribirProblema(
-                                respuesta,
-                                HttpServletResponse.SC_UNAUTHORIZED,
-                                "AUTENTICACIONREQUERIDA",
-                                "Debes iniciar sesión para consultar este recurso."))
-                        .accessDeniedHandler((peticion, respuesta, excepcion) -> escribirProblema(
-                                respuesta,
-                                HttpServletResponse.SC_FORBIDDEN,
-                                "ACCESODENEGADO",
-                                "No tienes permiso para realizar esta operación.")))
+                        .authenticationEntryPoint((peticion, respuesta, excepcion) ->
+                                manejadorErroresSeguridad.responderAutenticacionRequerida(peticion, respuesta))
+                        .accessDeniedHandler((peticion, respuesta, excepcion) ->
+                                manejadorErroresSeguridad.responderAccesoDenegado(peticion, respuesta)))
                 .headers(encabezados -> encabezados
                         .contentSecurityPolicy(csp -> csp.policyDirectives(
-                                "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"))
+                                "default-src 'self'; "
+                                + "script-src 'self' https://maps.googleapis.com https://maps.gstatic.com; "
+                                + "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                                + "img-src 'self' data: https://*.googleapis.com https://*.gstatic.com "
+                                + "https://*.google.com https://*.googleusercontent.com "
+                                + "https://server.arcgisonline.com; "
+                                + "font-src 'self' https://fonts.gstatic.com; "
+                                + "connect-src 'self' https://*.googleapis.com https://*.gstatic.com "
+                                + "https://*.google.com https://tiles.openfreemap.org "
+                                + "https://server.arcgisonline.com data: blob:; "
+                                + "frame-src https://*.google.com; worker-src blob:; "
+                                + "object-src 'none'; base-uri 'self'; form-action 'self'; "
+                                + "frame-ancestors 'none'"))
                         .referrerPolicy(referente -> referente.policy(ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
                         .permissionsPolicyHeader(permisos -> permisos.policy(
                                 "camera=(), microphone=(), geolocation=(self)")));
 
         return seguridadHttp.build();
-    }
-
-    private void escribirProblema(
-            HttpServletResponse respuesta,
-            int estado,
-            String codigo,
-            String detalle) throws java.io.IOException {
-        respuesta.setStatus(estado);
-        respuesta.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        respuesta.setContentType("application/problem+json");
-        respuesta.getWriter().write("""
-                {"title":"Acceso rechazado","status":%d,"detail":"%s","codigo":"%s"}
-                """.formatted(estado, detalle, codigo).strip());
     }
 }

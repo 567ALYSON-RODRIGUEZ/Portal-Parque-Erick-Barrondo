@@ -1,7 +1,7 @@
 package gt.gob.parqueerickbarrondo.identidad.aplicacion;
 
 import java.time.Instant;
-import java.util.UUID;
+import gt.gob.parqueerickbarrondo.compartido.observabilidad.IdentificadorCorrelacion;
 
 import gt.gob.parqueerickbarrondo.identidad.api.modelo.RespuestaPerfil;
 import gt.gob.parqueerickbarrondo.identidad.api.modelo.SolicitudCambioContrasena;
@@ -11,6 +11,7 @@ import gt.gob.parqueerickbarrondo.identidad.seguridad.UsuarioSesion;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
+import jakarta.servlet.http.Cookie;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.AuthenticationException;
@@ -23,6 +24,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class ServicioAutenticacion {
+
+    static final int DURACION_SESION_EXTENDIDA_SEGUNDOS = 7 * 24 * 60 * 60;
 
     private final AuthenticationManager administradorAutenticacion;
     private final SecurityContextRepository repositorioContextoSeguridad;
@@ -63,12 +66,26 @@ public class ServicioAutenticacion {
             HttpServletRequest peticion,
             HttpServletResponse respuesta) {
         var correo = normalizadorCorreo.normalizar(solicitud.correo());
-        var idCorrelacion = UUID.randomUUID().toString();
+        var idCorrelacion = IdentificadorCorrelacion.actual();
         var huellas = protectorIntentos.crearHuellas(
                 correo,
                 peticion.getRemoteAddr(),
                 peticion.getHeader("User-Agent"));
         protectorIntentos.verificarPermitido(huellas, idCorrelacion);
+
+        var usuarioRegistrado = repositorioUsuario.findByCorreoNormalizado(correo).orElse(null);
+        if (usuarioRegistrado == null) {
+            registrarIntentoFallido(huellas, "CORREONEXISTE", idCorrelacion);
+            throw new CredencialesInvalidasException("El correo no existe.");
+        }
+        if (!usuarioRegistrado.estaActivo()) {
+            registrarIntentoFallido(huellas, "CUENTANODISPONIBLE", idCorrelacion);
+            throw new CredencialesInvalidasException("La cuenta no está activa. Revisa tu correo o comunícate con el parque.");
+        }
+        if (!codificadorContrasena.matches(solicitud.contrasena(), usuarioRegistrado.obtenerHashContrasena())) {
+            registrarIntentoFallido(huellas, "CONTRASENAINCORRECTA", idCorrelacion);
+            throw new CredencialesInvalidasException("La contraseña es incorrecta. Vuelve a intentarlo.");
+        }
 
         try {
             var autenticacion = administradorAutenticacion.authenticate(
@@ -94,16 +111,27 @@ public class ServicioAutenticacion {
             contexto.setAuthentication(autenticacion);
             SecurityContextHolder.setContext(contexto);
             repositorioContextoSeguridad.saveContext(contexto, peticion, respuesta);
-            registroSesiones.registerNewSession(peticion.getSession().getId(), usuarioSesion);
+            var sesion = peticion.getSession();
+            if (solicitud.mantenerSesionActiva()) {
+                configurarSesionExtendida(sesion, peticion, respuesta);
+            }
+            registroSesiones.registerNewSession(sesion.getId(), usuarioSesion);
             return convertirPerfil(usuarioSesion);
         }
         catch (AuthenticationException excepcion) {
-            plantillaTransacciones.executeWithoutResult(estado -> {
-                protectorIntentos.registrar(null, huellas, "FALLIDO", "CREDENCIALESINVALIDAS", idCorrelacion);
-                servicioAuditoria.registrar(null, "INICIOSESION", "SESION", null, "FALLIDO", idCorrelacion);
-            });
-            throw new CredencialesInvalidasException();
+            registrarIntentoFallido(huellas, "CONTRASENAINCORRECTA", idCorrelacion);
+            throw new CredencialesInvalidasException("La contraseña es incorrecta. Vuelve a intentarlo.");
         }
+    }
+
+    private void registrarIntentoFallido(
+            ProtectorIntentosInicioSesion.HuellasIntento huellas,
+            String motivo,
+            String idCorrelacion) {
+        plantillaTransacciones.executeWithoutResult(estado -> {
+            protectorIntentos.registrar(null, huellas, "FALLIDO", motivo, idCorrelacion);
+            servicioAuditoria.registrar(null, "INICIOSESION", "SESION", null, "FALLIDO", idCorrelacion);
+        });
     }
 
     public RespuestaPerfil obtenerPerfil(UsuarioSesion usuarioSesion) {
@@ -132,7 +160,7 @@ public class ServicioAutenticacion {
                     "USUARIO",
                     usuarioSesion.obtenerIdUsuario().toString(),
                     "EXITOSO",
-                    UUID.randomUUID().toString());
+                    null);
         });
         invalidarOtrasSesiones(usuarioSesion, sesionActual.getId());
     }
@@ -143,6 +171,20 @@ public class ServicioAutenticacion {
             sesionAnterior.invalidate();
         }
         peticion.getSession(true);
+    }
+
+    static void configurarSesionExtendida(
+            HttpSession sesion,
+            HttpServletRequest peticion,
+            HttpServletResponse respuesta) {
+        sesion.setMaxInactiveInterval(DURACION_SESION_EXTENDIDA_SEGUNDOS);
+        var cookie = new Cookie("JSESSIONID", sesion.getId());
+        cookie.setHttpOnly(true);
+        cookie.setSecure(peticion.isSecure());
+        cookie.setPath(peticion.getContextPath().isBlank() ? "/" : peticion.getContextPath());
+        cookie.setMaxAge(DURACION_SESION_EXTENDIDA_SEGUNDOS);
+        cookie.setAttribute("SameSite", "Lax");
+        respuesta.addCookie(cookie);
     }
 
     private void invalidarOtrasSesiones(UsuarioSesion usuarioSesion, String idSesionActual) {

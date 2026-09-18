@@ -1,14 +1,25 @@
 server:
   forward-headers-strategy: framework
+  error:
+    include-binding-errors: never
+    include-exception: false
+    include-message: never
+    include-stacktrace: never
   servlet:
     session:
       cookie:
         secure: true
 
 spring:
+  mail:
+    test-connection: ${CORREOPROBARCONEXIONALINICIAR:true}
   jpa:
     hibernate:
       ddl-auto: validate
+
+correo:
+  verificacion:
+    envio-habilitado: ${CORREOENVIOHABILITADO:true}
 
 management:
   endpoint:

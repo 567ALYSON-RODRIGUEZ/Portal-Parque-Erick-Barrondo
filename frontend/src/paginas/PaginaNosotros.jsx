@@ -1,6 +1,41 @@
+import { useEffect, useState } from "react";
+import { consultarContenidoInstitucional } from "../api/portalPublico";
+import { obtenerMensajeError } from "../api/clienteHttp";
 import { CabeceraPagina } from "../componentes/CabeceraPagina";
 
+const contenidoInicial = {
+  resumen: "El Centro Deportivo Erick Bernabé Barrondo García es un espacio público de recreación, deporte y naturaleza en la Ciudad de Guatemala. Sus áreas deportivas, ciclovía, juegos y espacios familiares permiten una convivencia activa y gratuita.",
+  mision: "Promover el deporte, la recreación y la convivencia familiar mediante espacios accesibles, seguros e inclusivos para la comunidad.",
+  vision: "Ser un referente de bienestar, inclusión y desarrollo deportivo para las familias de Guatemala.",
+  valores: "Inclusión, respeto, bienestar, convivencia, seguridad y cuidado de la naturaleza.",
+};
+
 export function PaginaNosotros() {
+  const [contenido, establecerContenido] = useState(contenidoInicial);
+  const [error, establecerError] = useState("");
+
+  useEffect(() => {
+    let vigente = true;
+    consultarContenidoInstitucional()
+      .then((contenidoRecibido) => {
+        if (vigente) {
+          establecerContenido(contenidoRecibido);
+          establecerError("");
+        }
+      })
+      .catch((errorCarga) => {
+        if (vigente) {
+          establecerError(obtenerMensajeError(
+            errorCarga,
+            "No fue posible actualizar la información institucional. Se muestra la versión disponible.",
+          ));
+        }
+      });
+    return () => {
+      vigente = false;
+    };
+  }, []);
+
   return (
     <>
       <CabeceraPagina
@@ -9,29 +44,24 @@ export function PaginaNosotros() {
         descripcion="Conoce la identidad, propósito y compromiso del Parque Erick Barrondo."
       />
       <section className="portal-seccion">
-        <div className="portal-contenedor nosotros-panel">
+        <div className="portal-contenedor nosotros-panel nosotros-panel-institucional">
+          {error && <p className="portal-mensaje-error" role="alert">{error}</p>}
           <div className="nosotros-introduccion">
-            <p className="portal-sobrelinea">Sobre el parque</p>
-            <h2>Un espacio público al servicio de la comunidad</h2>
-            <p>
-              Irá información de resumen de parque de Erick BarrondoS.
-            </p>
+            <h2>Sobre nosotros</h2>
+            <p>{contenido.resumen}</p>
           </div>
           <div className="nosotros-propositos">
             <article>
-              <span>01</span>
               <h3>Misión</h3>
-              <p>Texto institucional pendiente de validación y autorización.</p>
+              <p>{contenido.mision}</p>
             </article>
             <article>
-              <span>02</span>
               <h3>Visión</h3>
-              <p>Texto institucional pendiente de validación y autorización.</p>
+              <p>{contenido.vision}</p>
             </article>
             <article>
-              <span>03</span>
               <h3>Valores</h3>
-              <p>Contenido pendiente de ser proporcionado por la institución.</p>
+              <p>{contenido.valores}</p>
             </article>
           </div>
         </div>

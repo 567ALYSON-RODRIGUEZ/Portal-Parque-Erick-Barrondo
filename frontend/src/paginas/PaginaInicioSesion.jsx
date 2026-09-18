@@ -1,17 +1,17 @@
 import { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { usarSesion } from "../autenticacion/ContextoSesion";
+import { MarcaPortal } from "../componentes/EstructuraPortal";
 
 export function PaginaInicioSesion() {
   const { iniciar } = usarSesion();
   const navegacion = useNavigate();
-  const ubicacion = useLocation();
-  const [datos, setDatos] = useState({ correo: "", contrasena: "" });
+  const [datos, setDatos] = useState({ correo: "", contrasena: "", mantenerSesionActiva: false });
   const [estado, setEstado] = useState({ enviando: false, error: "" });
 
   function actualizarCampo(evento) {
-    const { name, value } = evento.target;
-    setDatos((actuales) => ({ ...actuales, [name]: value }));
+    const { name, type, value, checked } = evento.target;
+    setDatos((actuales) => ({ ...actuales, [name]: type === "checkbox" ? checked : value }));
   }
 
   async function enviar(evento) {
@@ -19,19 +19,19 @@ export function PaginaInicioSesion() {
     setEstado({ enviando: true, error: "" });
     try {
       await iniciar(datos);
-      const destino = typeof ubicacion.state?.desde === "string" && ubicacion.state.desde.startsWith("/")
-        ? ubicacion.state.desde
-        : "/perfil";
-      navegacion(destino, { replace: true });
+      navegacion("/", { replace: true });
     } catch (error) {
       setEstado({ enviando: false, error: error.message });
     }
   }
 
   return (
-    <main className="pagina-formulario">
-      <Link className="enlace-regreso" to="/">← Volver al inicio</Link>
-      <div className="tarjeta-formulario">
+    <main className="pagina-formulario pagina-inicio-sesion">
+      <Link className="enlace-regreso enlace-regreso-inicio-sesion" to="/">← Volver al inicio</Link>
+      <div className="tarjeta-formulario tarjeta-inicio-sesion">
+        <div className="marca-identidad-acceso marca-identidad-inicio-sesion">
+          <MarcaPortal mostrarDerechos={false} />
+        </div>
         <p className="etiqueta-fase">Acceso a la plataforma</p>
         <h1>Iniciar sesión</h1>
         <p>Utiliza tus credenciales.</p>
@@ -59,10 +59,21 @@ export function PaginaInicioSesion() {
             value={datos.contrasena}
             onChange={actualizarCampo}
           />
+          <label className="opcion-mantener-sesion" htmlFor="mantenerSesionActiva">
+            <input
+              id="mantenerSesionActiva"
+              name="mantenerSesionActiva"
+              type="checkbox"
+              checked={datos.mantenerSesionActiva}
+              onChange={actualizarCampo}
+            />
+            <span>Mantener sesión activa por 1 semana<small>No marques esta opción en un equipo compartido.</small></span>
+          </label>
           <button type="submit" disabled={estado.enviando}>
             {estado.enviando ? "Comprobando…" : "Ingresar"}
           </button>
         </form>
+        <p className="ayuda-formulario"><Link to="/recuperar-contrasena">¿Olvidaste tu contraseña?</Link></p>
         <p className="ayuda-formulario">¿Todavía no tienes cuenta? <Link to="/registro">Crear cuenta</Link></p>
       </div>
     </main>

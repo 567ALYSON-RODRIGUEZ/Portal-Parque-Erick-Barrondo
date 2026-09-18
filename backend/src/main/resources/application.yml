@@ -26,11 +26,51 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
     properties:
       hibernate.jdbc.time_zone: UTC
+      hibernate.type.preferred_instant_jdbc_type: TIMESTAMP
   mvc:
     problemdetails:
       enabled: true
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 21MB
+  mail:
+    host: ${CORREOSMTPHOST:smtp.gmail.com}
+    port: ${CORREOSMTPPUERTO:587}
+    username: ${CORREONOREPLY:}
+    password: ${CORREOCLAVEAPLICACION:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.starttls.required: true
+      mail.smtp.connectiontimeout: 10000
+      mail.smtp.timeout: 15000
+      mail.smtp.writetimeout: 15000
+    test-connection: ${CORREOPROBARCONEXIONALINICIAR:false}
+
+correo:
+  verificacion:
+    duracion-horas: ${CORREOVERIFICACIONDURACIONHORAS:24}
+    reenvio-espera-minutos: ${CORREOVERIFICACIONREENVIOESPERAMINUTOS:5}
+    envio-habilitado: ${CORREOENVIOHABILITADO:false}
+    remitente: ${CORREONOREPLY:noreply@parqueerickbarrondo.gob.gt}
+    url-publica: ${URLPUBLICAFRONTEND:http://127.0.0.1:5173}
+
+almacenamiento:
+  publicaciones:
+    ruta: ${ALMACENAMIENTORUTAPUBLICACIONES:../datos/publicaciones}
+  eventos:
+    ruta: ${ALMACENAMIENTORUTAEVENTOS:../datos/eventos}
+  areas:
+    ruta: ${ALMACENAMIENTORUTAAREAS:../datos/areas}
+  solicitudes:
+    ruta: ${ALMACENAMIENTORUTASOLICITUDES:../datos/solicitudes}
+  perfiles:
+    ruta: ${ALMACENAMIENTORUTAPERFILES:../datos/perfiles}
 
 server:
   port: ${PUERTOSERVIDOR:8080}
@@ -41,10 +81,13 @@ server:
         same-site: lax
 
 management:
+  health:
+    mail:
+      enabled: ${CORREOENVIOHABILITADO:false}
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: never
@@ -59,7 +102,7 @@ seguridad:
   intentos:
     clave-huellas: ${SEGURIDADCLAVEHUELLAS}
     maximos: ${SEGURIDADMAXIMOINTENTOS:5}
-    ventana-minutos: ${SEGURIDADVENTANAMINUTOS:15}
+    ventana-minutos: ${SEGURIDADVENTANAMINUTOS:10}
   contrasena:
     longitud-minima: ${SEGURIDADLONGITUDMINIMACONTRASENA:12}
 
