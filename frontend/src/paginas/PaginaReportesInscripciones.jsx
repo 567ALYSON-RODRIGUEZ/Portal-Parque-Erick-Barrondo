@@ -1,9 +1,12 @@
+import { AvisoEnContexto } from "../componentes/AvisosEnContexto";
 import { CabeceraAdministracion } from "../componentes/CabeceraAdministracion";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { FotografiaParticipante } from "../componentes/FotografiaParticipante";
 
 import {
   listarPersonasInscritasReporte,
   listarReporteInscripciones,
+  consultarParticipanteReporte,
 } from "../api/administracionReportes";
 import { formatearTextoEditorial, formatearTextoTecnico } from "../utilidades/formatoTexto";
 
@@ -24,6 +27,20 @@ function interpretarGrupos(curso) {
     const configuracion = JSON.parse(curso.configuracionGruposJson);
     return Array.isArray(configuracion.grupos) ? configuracion.grupos : [];
   } catch { return []; }
+}
+
+function descargarCsv(nombre, encabezados, filas) {
+  const escapar = (valor) => {
+    const texto = String(valor ?? "");
+    const seguro = /^[=+\-@]/.test(texto.trimStart()) ? `'${texto}` : texto;
+    return `"${seguro.replaceAll('"', '""')}"`;
+  };
+  const contenido = [encabezados, ...filas].map((fila) => fila.map(escapar).join(";")).join("\r\n");
+  const enlace = document.createElement("a");
+  enlace.href = window.URL.createObjectURL(new window.Blob([`\ufeff${contenido}`], { type: "text/csv;charset=utf-8" }));
+  enlace.download = nombre;
+  enlace.click();
+  window.URL.revokeObjectURL(enlace.href);
 }
 
 const nombresDias = { LUNES: "Lunes", MARTES: "Martes", MIERCOLES: "Miércoles", JUEVES: "Jueves", VIERNES: "Viernes", SABADO: "Sábado", DOMINGO: "Domingo" };
@@ -51,6 +68,27 @@ export function PaginaReportesInscripciones() {
   const [busquedaPersonas, establecerBusquedaPersonas] = useState("");
   const [estadoCursos, establecerEstadoCursos] = useState({ cargando: true, error: "" });
   const [estadoPersonas, establecerEstadoPersonas] = useState({ cargando: false, error: "" });
+  const [exportando, establecerExportando] = useState(false);
+  const [detalleParticipante, setDetalleParticipante] = useState(null);
+  const consultaDetalle = useRef(0);
+
+  useEffect(() => {
+    consultaDetalle.current += 1;
+    setDetalleParticipante(null);
+    return () => { consultaDetalle.current += 1; };
+  }, [cursoSeleccionado, busquedaPersonas, personas.pagina]);
+
+  async function verParticipante(persona) {
+    const consulta = ++consultaDetalle.current;
+    if (detalleParticipante?.id === persona.idInscripcionEvento) { setDetalleParticipante(null); return; }
+    setDetalleParticipante({ id: persona.idInscripcionEvento, cargando: true });
+    try {
+      const datos = await consultarParticipanteReporte(cursoSeleccionado.idEvento, persona.idInscripcionEvento);
+      if (consulta === consultaDetalle.current) setDetalleParticipante({ id: persona.idInscripcionEvento, datos });
+    } catch (error) {
+      if (consulta === consultaDetalle.current) setDetalleParticipante({ id: persona.idInscripcionEvento, error: error.message });
+    }
+  }
 
   useEffect(() => {
     let vigente = true;
@@ -125,6 +163,45 @@ export function PaginaReportesInscripciones() {
     establecerPersonas(paginaVacia);
   }
 
+  async function cargarTodasLasPaginas(cargar) {
+    const primera = await cargar(0);
+    const contenido = [...primera.contenido];
+    for (let pagina = 1; pagina < primera.totalPaginas; pagina += 1) {
+      const siguiente = await cargar(pagina);
+      contenido.push(...siguiente.contenido);
+    }
+    return contenido;
+  }
+
+  async function exportarCursos() {
+    establecerExportando(true);
+    try {
+      const todos = await cargarTodasLasPaginas((pagina) => listarReporteInscripciones({ busqueda: busquedaCursos, pagina, tamano: 50 }));
+      descargarCsv("reporte-cursos-inscripciones.csv",
+        ["Curso o actividad", "Estado", "Lugar", "Fecha de inicio", "Personas inscritas"],
+        todos.map((curso) => [curso.titulo, formatearTextoTecnico(curso.estado), curso.lugar || "", formatearFecha(curso.iniciaEn), curso.cantidadPersonasInscritas]));
+    } catch (error) {
+      establecerEstadoCursos((actual) => ({ ...actual, error: error.message }));
+    } finally {
+      establecerExportando(false);
+    }
+  }
+
+  async function exportarPersonas() {
+    establecerExportando(true);
+    try {
+      const todas = await cargarTodasLasPaginas((pagina) => listarPersonasInscritasReporte(
+        cursoSeleccionado.idEvento, { busqueda: busquedaPersonas, pagina, tamano: 50 }));
+      descargarCsv(`inscripciones-${cursoSeleccionado.titulo.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.csv`,
+        ["Nombre", "Apellido", "Correo", "Grupo", "Confirmación"],
+        todas.map((persona) => [persona.nombre, persona.apellido, persona.correo, persona.nombreGrupo || persona.codigoGrupo || "Horario general", formatearFecha(persona.confirmadaEn)]));
+    } catch (error) {
+      establecerEstadoPersonas((actual) => ({ ...actual, error: error.message }));
+    } finally {
+      establecerExportando(false);
+    }
+  }
+
   return (
     <main className="pagina-administracion pagina-reportes-inscripciones">
       <CabeceraAdministracion titulo="Reportes de inscripciones" descripcion="Consulta los cursos o actividades y las personas que mantienen una inscripción confirmada." />
@@ -138,19 +215,23 @@ export function PaginaReportesInscripciones() {
         </nav>
 
         <div className="contenido-modulo-administracion">
-          {estadoCursos.error && <p className="mensaje-error" role="alert">{estadoCursos.error}</p>}
+          {estadoCursos.error && <AvisoEnContexto className="mensaje-error" role="alert">{estadoCursos.error}</AvisoEnContexto>}
           <section className="panel-edicion" aria-labelledby="titulo-reporte-cursos">
             <div className="cabecera-panel-administracion">
               <div>
                 <h2 id="titulo-reporte-cursos">Cursos y actividades</h2>
                 <p>{cursos.totalElementos} registros encontrados.</p>
               </div>
+              <div className="acciones-exportacion-reporte">
+                <button type="button" className="boton-secundario" disabled={exportando || cursos.contenido.length === 0} onClick={exportarCursos}>{exportando ? "Preparando archivo…" : "Descargar para Excel"}</button>
+                <button type="button" className="boton-secundario" onClick={() => window.print()}>Imprimir o guardar PDF</button>
+              </div>
             </div>
             <div className="busqueda-usuarios busqueda-reporte">
               <label htmlFor="busquedaCursoReporte">Buscar curso o actividad</label>
               <input id="busquedaCursoReporte" maxLength="100" autoComplete="off" value={busquedaCursos} onChange={(evento) => establecerBusquedaCursos(evento.target.value)} />
             </div>
-            <div className="tabla-contenedor tabla-reporte-inscripciones">
+            <div className="tabla-contenedor tabla-reporte-inscripciones" role="region" aria-label="Cursos e inscripciones" tabIndex={0}>
               <table>
                 <thead><tr><th>Curso o actividad</th><th>Horario</th><th>Lugar</th><th>Personas inscritas</th><th><span className="solo-lector">Acciones</span></th></tr></thead>
                 <tbody>
@@ -181,24 +262,41 @@ export function PaginaReportesInscripciones() {
                   <h2 id="titulo-personas-reporte">Personas inscritas en {formatearTextoEditorial(cursoSeleccionado.titulo)}</h2>
                   <p>{personas.totalElementos} inscripciones confirmadas.</p>
                 </div>
-                <button className="boton-secundario" type="button" onClick={() => establecerCursoSeleccionado(null)}>Cerrar detalle</button>
+                <div className="acciones-exportacion-reporte"><button className="boton-secundario" type="button" disabled={exportando || personas.contenido.length === 0} onClick={exportarPersonas}>{exportando ? "Preparando archivo…" : "Descargar para Excel"}</button><button className="boton-secundario" type="button" onClick={() => window.print()}>Imprimir o guardar PDF</button><button className="boton-secundario" type="button" onClick={() => establecerCursoSeleccionado(null)}>Cerrar detalle</button></div>
               </div>
-              {estadoPersonas.error && <p className="mensaje-error" role="alert">{estadoPersonas.error}</p>}
+              {estadoPersonas.error && <AvisoEnContexto className="mensaje-error" role="alert">{estadoPersonas.error}</AvisoEnContexto>}
               <div className="busqueda-usuarios busqueda-reporte">
                 <label htmlFor="busquedaPersonaReporte">Buscar persona por nombre o correo</label>
                 <input id="busquedaPersonaReporte" maxLength="100" autoComplete="off" value={busquedaPersonas} onChange={(evento) => establecerBusquedaPersonas(evento.target.value)} />
               </div>
-              <div className="tabla-contenedor tabla-reporte-personas">
+              <div className="tabla-contenedor tabla-reporte-personas" role="region" aria-label="Personas inscritas" tabIndex={0}>
                 <table>
                   <thead><tr><th>Persona</th><th>Correo</th><th>Horario o grupo</th><th>Confirmación</th></tr></thead>
                   <tbody>
                     {personas.contenido.map((persona) => (
-                      <tr key={persona.idInscripcionEvento}>
-                        <td>{persona.nombre} {persona.apellido}</td>
+                      <Fragment key={persona.idInscripcionEvento}>
+                      <tr>
+                        <td><button type="button" className="boton-secundario" aria-expanded={detalleParticipante?.id === persona.idInscripcionEvento} onClick={() => verParticipante(persona)}>{persona.nombre} {persona.apellido}</button></td>
                         <td>{persona.correo}</td>
                         <td><HorarioCurso curso={cursoSeleccionado} codigoGrupo={persona.codigoGrupo} /></td>
                         <td>{formatearFecha(persona.confirmadaEn)}</td>
                       </tr>
+                      {detalleParticipante?.id === persona.idInscripcionEvento && <tr><td colSpan="4">
+                        {detalleParticipante.cargando && <p role="status">Cargando participante…</p>}
+                        {detalleParticipante.error && <AvisoEnContexto role="alert" className="mensaje-error">{detalleParticipante.error}</AvisoEnContexto>}
+                        {detalleParticipante.datos && <div className="resumen-participante">
+                          {detalleParticipante.datos.fotografia ? <FotografiaParticipante src={detalleParticipante.datos.fotografia} nombre={`${persona.nombre} ${persona.apellido}`} /> : <p>Sin fotografía registrada.</p>}
+                          <dl>
+                            <div><dt>Participante</dt><dd>{detalleParticipante.datos.nombre} {detalleParticipante.datos.apellido}</dd></div>
+                            <div><dt>Inscrito como</dt><dd>{detalleParticipante.datos.titular ? "Titular de la cuenta (Yo)" : "Niño(a)"}</dd></div>
+                            <div><dt>Nacimiento</dt><dd>{detalleParticipante.datos.fechaNacimiento || "Sin fecha registrada"}</dd></div>
+                            <div><dt>{detalleParticipante.datos.titular ? "Cuenta" : "Encargado"}</dt><dd>{detalleParticipante.datos.nombreResponsable}</dd></div>
+                            <div><dt>Correo</dt><dd>{detalleParticipante.datos.correo}</dd></div>
+                            {Object.entries(detalleParticipante.datos.requisitos || {}).map(([etiqueta, valor]) => <div key={etiqueta}><dt>{etiqueta}</dt><dd>{valor}</dd></div>)}
+                          </dl>
+                        </div>}
+                      </td></tr>}
+                      </Fragment>
                     ))}
                     {!estadoPersonas.cargando && personas.contenido.length === 0 && <tr><td colSpan="4">No hay inscripciones confirmadas que coincidan con la búsqueda.</td></tr>}
                   </tbody>

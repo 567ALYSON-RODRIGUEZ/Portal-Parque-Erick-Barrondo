@@ -1,3 +1,4 @@
+import { AvisoEnContexto } from "../componentes/AvisosEnContexto";
 import { CabeceraAdministracion } from "../componentes/CabeceraAdministracion";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -325,7 +326,9 @@ export function PaginaAdministracionPublicaciones() {
       establecerImagenesGaleriaPendientes([]);
       establecerImagenes(await listarImagenesPublicacion(guardada.idPublicacion));
       await recargarPublicaciones(pagina.pagina);
-      establecerEstado({ cargando: false, guardando: false, error: "", mensaje: "Noticia guardada como borrador." });
+      establecerEstado({ cargando: false, guardando: false, error: "", mensaje: guardada.estado === "PUBLICADA"
+        ? "Noticia publicada y cambios guardados."
+        : "Noticia guardada como borrador." });
     } catch (error) {
       if (guardada) establecerPublicacionEdicion({ ...guardada, fechaEditorial: guardada.fechaEditorial || "" });
       if (cantidadGaleriaSubida > 0) {
@@ -348,7 +351,9 @@ export function PaginaAdministracionPublicaciones() {
       const actualizada = await accion(publicacionEdicion.idPublicacion, publicacionEdicion.version);
       establecerPublicacionEdicion({ ...actualizada, fechaEditorial: actualizada.fechaEditorial || "" });
       await recargarPublicaciones(pagina.pagina);
-      establecerEstado({ cargando: false, guardando: false, error: "", mensaje: "Estado de la noticia actualizado." });
+      establecerEstado({ cargando: false, guardando: false, error: "", mensaje: actualizada.estado === "PUBLICADA"
+        ? "Noticia publicada correctamente."
+        : actualizada.estado === "ARCHIVADA" ? "Noticia archivada." : "Noticia guardada como borrador." });
     } catch (error) {
       establecerEstado({ cargando: false, guardando: false, error: error.message, mensaje: "" });
     }
@@ -521,8 +526,8 @@ export function PaginaAdministracionPublicaciones() {
       </div>
         </nav>
         <div className="contenido-modulo-administracion">
-      {estado.error && <p className="mensaje-error" role="alert">{estado.error}</p>}
-      {estado.mensaje && <p className="mensaje-exito" role="status">{estado.mensaje}</p>}
+      {estado.error && <AvisoEnContexto className="mensaje-error" role="alert">{estado.error}</AvisoEnContexto>}
+      {estado.mensaje && <AvisoEnContexto className="mensaje-exito" role="status">{estado.mensaje}</AvisoEnContexto>}
       {!estado.cargando && categoriasActivas.length === 0 && (
         <p id="aviso-sin-categorias-publicacion" className="nota-formulario-administracion" role="status">
           Primero crea al menos una categoría activa para poder crear noticias.

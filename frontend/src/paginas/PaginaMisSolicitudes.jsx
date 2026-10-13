@@ -1,6 +1,8 @@
+import { AvisoEnContexto } from "../componentes/AvisosEnContexto";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import * as api from "../api/solicitudes";
+import { listarNotificaciones, marcarNotificacionLeida } from "../api/notificaciones";
 import { listarAreas } from "../api/portalPublico";
 import { formatearTextoTecnico } from "../utilidades/formatoTexto";
 
@@ -81,6 +83,8 @@ export function PaginaMisSolicitudes() {
   const [exito, setExito] = useState("");
   const [busquedaSolicitudes, setBusquedaSolicitudes] = useState("");
   const [orden, setOrden] = useState("RECIENTES");
+  const [notificaciones, setNotificaciones] = useState({ noLeidas: 0, contenido: [] });
+  const [mostrarNotificaciones, setMostrarNotificaciones] = useState(false);
 
   async function cargar(codigoGrupo = grupo, numeroPagina = 0) {
     setEstado((actual) => ({ ...actual, cargando: true, error: "" }));
@@ -88,6 +92,23 @@ export function PaginaMisSolicitudes() {
     catch (error) { setEstado((a) => ({ ...a, cargando: false, error: error.message })); }
   }
   useEffect(() => { cargar(grupo, 0); }, [grupo]);
+  useEffect(() => {
+    let vigente = true;
+    listarNotificaciones().then((respuesta) => { if (vigente) setNotificaciones(respuesta); }).catch(() => {});
+    return () => { vigente = false; };
+  }, []);
+
+  async function leerNotificacion(notificacion) {
+    if (!notificacion.leida) {
+      try {
+        const actualizada = await marcarNotificacionLeida(notificacion.idNotificacion);
+        setNotificaciones((actuales) => ({
+          noLeidas: Math.max(0, actuales.noLeidas - 1),
+          contenido: actuales.contenido.map((item) => item.idNotificacion === actualizada.idNotificacion ? actualizada : item),
+        }));
+      } catch { /* La notificación permanece visible y puede intentarse nuevamente. */ }
+    }
+  }
 
   async function abrirCatalogo() {
     setEstado((a) => ({ ...a, cargando: true, error: "", mensaje: "" }));
@@ -105,6 +126,15 @@ export function PaginaMisSolicitudes() {
       setEstado((a) => ({ ...a, cargando: false }));
     } catch (error) { setEstado((a) => ({ ...a, cargando: false, error: error.message })); }
   }
+  async function verInforme(idSolicitud) {
+    setEstado((a) => ({ ...a, cargando: true, error: "", mensaje: "" }));
+    try {
+      setSolicitud(await api.consultarSolicitud(idSolicitud));
+      setModal("informe");
+      setEstado((a) => ({ ...a, cargando: false }));
+    } catch (error) { setEstado((a) => ({ ...a, cargando: false, error: error.message })); }
+  }
+
   function cerrarModal() { setModal(""); setTramite(null); setSolicitud(null); setExito(""); setEstado((a) => ({ ...a, error: "" })); }
   async function abrirTramite(codigo) {
     setEstado((a) => ({ ...a, cargando: true, error: "" }));
@@ -199,11 +229,12 @@ export function PaginaMisSolicitudes() {
     setEstado((a) => ({ ...a, cargando: true, error: "" }));
     try {
       const [guardada, areasParque] = await Promise.all([api.consultarSolicitud(idSolicitud), listarAreas()]);
-      const codigo = guardada.detalle.codigoTramite || "RESERVACANCHAS"; setTramite(await api.consultarTramite(codigo));
+      const codigo = guardada.detalle.codigoTramite || "RESERVACANCHAS";
+      const detalleTramite = await api.consultarTramite(codigo); setTramite(detalleTramite);
       setSolicitud(guardada); setAreas(areasParque);
       setAspirante({ nombreCompleto: `${guardada.detalle.datosSolicitante?.nombre || ""} ${guardada.detalle.datosSolicitante?.apellido || ""}`.trim(), dpi: guardada.detalle.datosSolicitante?.dpi || "", telefono: guardada.detalle.datosSolicitante?.celular || "", correo: guardada.detalle.datosSolicitante?.correo || "", representanteLegal: Boolean(guardada.detalle.representanteLegal), institucion: guardada.detalle.institucion || "" });
       setEspacio({ codigoArea: guardada.detalle.codigoArea || "", fechaSolicitada: guardada.detalle.fechaSolicitada || "", horaInicio: guardada.detalle.horaInicio?.slice(0, 5) || "", horaFin: guardada.detalle.horaFin?.slice(0, 5) || "", tipoActividad: guardada.detalle.tipoActividad || "", cantidadPersonas: guardada.detalle.cantidadPersonas || 51, descripcion: guardada.detalle.descripcion || "", tipoReserva: guardada.detalle.tipoReserva || "", nombreResponsable: guardada.detalle.nombreResponsable || "" });
-      setModal(guardada.detalle.codigoArea ? "paso3" : guardada.detalle.tipoReserva ? "paso2" : "tipo"); setEstado((a) => ({ ...a, cargando: false }));
+      setModal(!detalleTramite.requiereReserva ? "paso3" : guardada.detalle.codigoArea ? "paso3" : guardada.detalle.tipoReserva ? "paso2" : "tipo"); setEstado((a) => ({ ...a, cargando: false }));
     } catch (error) { setEstado((a) => ({ ...a, cargando: false, error: error.message })); }
   }
 
@@ -259,7 +290,10 @@ export function PaginaMisSolicitudes() {
           <button type="button" onClick={abrirDenuncias}><IconoPanel tipo="ayuda" /><span>Denuncias y quejas</span></button>
         </nav>
         <div className="acciones-superiores-solicitudes">
-          <button type="button" className="notificaciones-solicitudes" aria-label="Notificaciones"><IconoPanel tipo="campana" /><i /></button>
+          <div className="contenedor-notificaciones-solicitudes">
+            <button type="button" className="notificaciones-solicitudes" aria-label={`Notificaciones${notificaciones.noLeidas ? `, ${notificaciones.noLeidas} sin leer` : ""}`} aria-expanded={mostrarNotificaciones} onClick={() => setMostrarNotificaciones((visible) => !visible)}><IconoPanel tipo="campana" />{notificaciones.noLeidas > 0 && <i>{notificaciones.noLeidas > 9 ? "9+" : notificaciones.noLeidas}</i>}</button>
+            {mostrarNotificaciones && <section className="panel-notificaciones-solicitudes" aria-label="Notificaciones recientes"><header><strong>Notificaciones</strong><button type="button" onClick={() => setMostrarNotificaciones(false)}>Cerrar</button></header>{notificaciones.contenido.length === 0 ? <p>No tienes notificaciones recientes.</p> : <ul>{notificaciones.contenido.map((notificacion) => <li key={notificacion.idNotificacion} className={notificacion.leida ? "" : "no-leida"}><button type="button" onClick={() => leerNotificacion(notificacion)}><strong>{notificacion.asunto}</strong><small>{formatoFecha.format(new Date(notificacion.creadaEn))}</small></button></li>)}</ul>}</section>}
+          </div>
           <Link to="/perfil" className="cuenta-superior-solicitudes"><span>Mi cuenta</span><b>U</b><i>⌄</i></Link>
         </div>
       </div>
@@ -267,7 +301,7 @@ export function PaginaMisSolicitudes() {
     <div className="cuerpo-aplicacion-solicitudes">
       <main className="contenido-aplicacion-solicitudes">
         <section className="encabezado-mis-solicitudes"><div><p>Cuenta personal</p><h1>Mis solicitudes</h1><span>Consulta, continúa y da seguimiento a tus gestiones desde un solo lugar.</span></div><div className="accion-nueva-superior"><button type="button" aria-label="Nueva solicitud" onClick={abrirCatalogo}><IconoPanel tipo="nueva" /> Nueva solicitud</button><button type="button" aria-label="Más opciones de nueva solicitud" onClick={abrirCatalogo}>⌄</button></div></section>
-        {estado.error && <p className="mensaje-error mensaje-flotante-solicitudes" role="alert">{estado.error}</p>}{estado.mensaje && <p className="mensaje-exito mensaje-flotante-solicitudes" role="status">{estado.mensaje}</p>}
+        {!modal && estado.error && <AvisoEnContexto className="mensaje-error mensaje-flotante-solicitudes" role="alert">{estado.error}</AvisoEnContexto>}{!modal && estado.mensaje && <AvisoEnContexto className="mensaje-exito mensaje-flotante-solicitudes" role="status">{estado.mensaje}</AvisoEnContexto>}
         <section className="panel-filtros-solicitudes">
           <div className="fila-pestanas-solicitudes"><nav className="pestanas-solicitudes" aria-label="Estados de solicitudes"><button type="button" className={grupo === "TODOS" ? "activo" : ""} onClick={() => seleccionarGrupo("TODOS")}>Todos<b>{totalSolicitudes}</b></button>{grupos.map((item) => <button key={item.codigo} type="button" className={grupo === item.codigo ? "activo" : ""} onClick={() => seleccionarGrupo(item.codigo)}>{item.etiqueta}<b>{pagina.conteos[item.conteo]}</b></button>)}</nav><label className="orden-solicitudes"><span>Ordenar por:</span><select aria-label="Ordenar solicitudes" value={orden} onChange={(evento) => setOrden(evento.target.value)}><option value="RECIENTES">Más recientes</option><option value="ANTIGUAS">Más antiguas</option></select></label></div>
         </section>
@@ -276,21 +310,36 @@ export function PaginaMisSolicitudes() {
           <div className="resultados-solicitudes" aria-live="polite">
             {estado.cargando && <div className="carga-solicitudes-dashboard"><i /><p>Cargando solicitudes…</p></div>}
             {!estado.cargando && solicitudesVisibles.length === 0 && <div className="estado-vacio-solicitudes estado-vacio-dashboard"><span><IconoPanel tipo="portapapeles" /></span><i className="destello-vacio uno">◇</i><i className="destello-vacio dos">◇</i><h3>No hay solicitudes en esta categoría</h3><p>{busquedaSolicitudes ? "Prueba con otra palabra o número de solicitud." : mensajesVacios[grupo]}</p><button type="button" onClick={abrirCatalogo}>Crear una nueva solicitud</button></div>}
-            {solicitudesVisibles.map((item) => <article key={item.idSolicitud} className="tarjeta-solicitud-dashboard"><strong className="numero-tarjeta-solicitud">#{item.idSolicitud}</strong><div className="datos-tarjeta-solicitud"><h3>{item.nombreTipoSolicitud}</h3></div><span className={`estado-solicitud estado-${item.estado.toLowerCase()}`}>{formatearTextoTecnico(item.estado)}</span><time>{formatoFechaCorta.format(new Date(item.creadoEn || item.actualizadoEn))}</time><time>{formatoFecha.format(new Date(item.actualizadoEn))}</time><div className="acciones-tarjeta-solicitud">{item.estado === "BORRADOR" && <><button type="button" className="continuar-tarjeta-solicitud" disabled={estado.guardando} onClick={() => continuarBorrador(item.idSolicitud)}>Continuar <span>→</span></button><button type="button" className="eliminar-tarjeta-solicitud" disabled={estado.guardando} onClick={() => eliminarBorrador(item.idSolicitud)}>Eliminar</button></>}</div>{item.resolucion && <p className="respuesta-solicitud"><strong>Respuesta de la administración</strong>{item.resolucion}</p>}</article>)}
+            {solicitudesVisibles.map((item) => <article key={item.idSolicitud} className="tarjeta-solicitud-dashboard"><strong className="numero-tarjeta-solicitud">#{item.idSolicitud}</strong><div className="datos-tarjeta-solicitud"><h3>{item.nombreTipoSolicitud}</h3></div><span className={`estado-solicitud estado-${item.estado.toLowerCase()}`}>{formatearTextoTecnico(item.estado)}</span><time>{formatoFechaCorta.format(new Date(item.creadoEn || item.actualizadoEn))}</time><time>{formatoFecha.format(new Date(item.actualizadoEn))}</time><div className="acciones-tarjeta-solicitud">{item.estado !== "BORRADOR" && <button type="button" onClick={() => verInforme(item.idSolicitud)}>Ver detalle{item.estado === "APROBADA" ? " y comprobante" : ""}</button>}{item.estado === "BORRADOR" && <><button type="button" className="continuar-tarjeta-solicitud" disabled={estado.guardando} onClick={() => continuarBorrador(item.idSolicitud)}>Continuar <span>→</span></button><button type="button" className="eliminar-tarjeta-solicitud" disabled={estado.guardando} onClick={() => eliminarBorrador(item.idSolicitud)}>Eliminar</button></>}</div>{item.resolucion && <p className="respuesta-solicitud"><strong>Respuesta de la administración</strong>{item.resolucion}</p>}</article>)}
           </div>
         </section>
       </main>
     </div>
 
-    {modal && <div className="fondo-modal-tramites" role="presentation"><section className="modal-tramites ventanilla-agil" role="dialog" aria-modal="true" aria-label={modal === "denuncia" ? "Denuncias y quejas" : "Nueva solicitud"}><header><div><h2>{modal === "denuncia" ? "Denuncias y quejas" : "Nueva solicitud"}</h2></div><button type="button" className="cerrar-modal-tramites" onClick={cerrarModal} aria-label="Cerrar">×</button></header>{estado.error && <p className="mensaje-error" role="alert">{estado.error}</p>}
+    {modal && <div className="fondo-modal-tramites" role="presentation"><section className="modal-tramites ventanilla-agil" role="dialog" aria-modal="true" aria-label={modal === "informe" ? "Detalle de solicitud" : modal === "denuncia" ? "Denuncias y quejas" : "Nueva solicitud"}><header><div><h2>{modal === "denuncia" ? "Denuncias y quejas" : "Nueva solicitud"}</h2></div><button type="button" className="cerrar-modal-tramites" onClick={cerrarModal} aria-label="Cerrar">×</button></header>{estado.error && <AvisoEnContexto className="mensaje-error" role="alert">{estado.error}</AvisoEnContexto>}
       {modal === "catalogo" && <Catalogo catalogo={catalogoSolicitudes} categoria={categoria} setCategoria={setCategoria} busqueda={busqueda} setBusqueda={setBusqueda} categoriasVisibles={categoriasVisibles} totalTramites={totalTramitesVisibles} abrir={abrirTramite} />}
+      {modal === "informe" && solicitud && <div className="contenido-modal-tramites informe-solicitud">
+        <h3>Solicitud #{solicitud.idSolicitud} · {formatearTextoTecnico(solicitud.estado)}</h3>
+        <dl><dt>Trámite</dt><dd>{solicitud.nombreTipoSolicitud}</dd>
+          <dt>Lugar</dt><dd>{solicitud.detalle.nombreArea || solicitud.detalle.centroDeportivo || "Consulta las indicaciones de la resolución"}</dd>
+          <dt>Fecha solicitada</dt><dd>{solicitud.detalle.fechaSolicitada || "No aplica"}</dd>
+          <dt>Horario</dt><dd>{solicitud.detalle.horaInicio ? `${solicitud.detalle.horaInicio} a ${solicitud.detalle.horaFin}` : "No aplica"}</dd>
+          <dt>Resuelta por</dt><dd>{solicitud.resueltoPor || (solicitud.resueltoEn ? "No registrado en la resolución original" : "Pendiente de resolución")}</dd>
+          <dt>Fecha de resolución</dt><dd>{solicitud.resueltoEn ? formatoFecha.format(new Date(solicitud.resueltoEn)) : "Pendiente"}</dd>
+          <dt>Respuesta de la administración</dt><dd style={{ whiteSpace: "pre-wrap" }}>{solicitud.resolucion || "En proceso de revisión"}</dd>
+        </dl>
+        {solicitud.estado === "APROBADA" && <div className="acciones-comprobante">
+          <a href={`/api/v1/solicitudes/${solicitud.idSolicitud}/comprobante`} download>Descargar comprobante PDF</a>
+          <a href={`/api/v1/solicitudes/${solicitud.idSolicitud}/comprobante?imprimir=true`} target="_blank" rel="noopener noreferrer">Abrir PDF para imprimir</a>
+        </div>}
+      </div>}
       {modal === "detalle" && tramite && <DetalleTramite tramite={tramite} volver={() => setModal("catalogo")} comenzar={comenzarTramite} resena={resena} setResena={setResena} guardarResena={guardarResena} guardando={estado.guardando} />}
       {modal === "paso1" && <PasoSolicitante datos={aspirante} setDatos={setAspirante} guardar={guardarSolicitante} guardando={estado.guardando} />}
       {modal === "tipo" && <SelectorTipo seleccionar={seleccionarTipo} volver={() => setModal("paso1")} />}
       {modal === "paso2" && <PasoEspacio datos={espacio} setDatos={setEspacio} areas={areas} minimoFecha={minimoFecha} guardar={guardarEspacio} volver={() => setModal("tipo")} guardando={estado.guardando} />}
-      {modal === "paso3" && solicitud && <PasoDocumentos solicitud={solicitud} subir={subirDocumento} quitar={quitarDocumento} enviar={enviarSolicitud} volver={() => setModal("paso2")} continuar={cerrarModal} guardando={estado.guardando} />}
+      {modal === "paso3" && solicitud && <PasoDocumentos solicitud={solicitud} subir={subirDocumento} quitar={quitarDocumento} enviar={enviarSolicitud} volver={() => setModal(tramite?.requiereReserva ? "paso2" : "paso1")} continuar={cerrarModal} guardando={estado.guardando} />}
       {modal === "denuncia" && <FormularioDenuncia datos={denuncia} setDatos={setDenuncia} enviar={enviarDenuncia} guardando={estado.guardando} catalogo={catalogoSolicitudes} />}
-      {exito && <div className="fondo-exito-guardado"><div><span>✓</span><h3>Guardado exitoso</h3><p>{exito}</p><button type="button" onClick={() => { setExito(""); setModal(modal === "paso1" ? "tipo" : "paso3"); }}>Continuar</button></div></div>}
+      {exito && <div className="fondo-exito-guardado"><div><span>✓</span><h3>Guardado exitoso</h3><p>{exito}</p><button type="button" onClick={() => { setExito(""); setModal(modal === "paso1" ? (tramite?.requiereReserva ? "tipo" : "paso3") : "paso3"); }}>Continuar</button></div></div>}
     </section></div>}
   </div>;
 }
@@ -370,7 +419,7 @@ function DetalleTramite({ tramite, volver, comenzar, resena, setResena, guardarR
 }
 
 function PasoSolicitante({ datos, setDatos, guardar, guardando }) {
-  return <div className="contenido-modal-tramites formulario-tramite"><Pasos paso={1} /><h3>Paso 1 · Información del solicitante</h3><p className="nota-informativa-solicitud"><strong>Importante:</strong> escribe tus datos tal y como aparecen en tu DPI.</p><form onSubmit={guardar} className="cuadricula-formulario-solicitud"><label>Nombre completo *<input required maxLength="200" value={datos.nombreCompleto} onChange={(e) => setDatos({ ...datos, nombreCompleto: e.target.value })} /></label><label>DPI - CUI *<input required inputMode="numeric" pattern="[0-9]{13}" maxLength="13" value={datos.dpi} onChange={(e) => setDatos({ ...datos, dpi: e.target.value })} /></label><label>Teléfono *<input required value={datos.telefono} onChange={(e) => setDatos({ ...datos, telefono: e.target.value })} /></label><label>Correo electrónico *<input type="email" required value={datos.correo} onChange={(e) => setDatos({ ...datos, correo: e.target.value })} /></label><label>¿Eres representante legal de una institución? *<select value={String(datos.representanteLegal)} onChange={(e) => setDatos({ ...datos, representanteLegal: e.target.value === "true" })}><option value="false">No</option><option value="true">Sí</option></select></label>{datos.representanteLegal && <label>Institución *<input required value={datos.institucion} onChange={(e) => setDatos({ ...datos, institucion: e.target.value })} /></label>}<div className="acciones-formulario-solicitud campo-ancho"><button disabled={guardando}>Guardar y siguiente</button></div></form></div>;
+  return <div className="contenido-modal-tramites formulario-tramite"><Pasos paso={1} /><h3>Paso 1 · Información del solicitante</h3><p className="nota-informativa-solicitud"><strong>Importante:</strong> escribe tus datos tal y como aparecen en tu DPI.</p><form onSubmit={guardar} className="cuadricula-formulario-solicitud"><label>Nombre completo *<input required maxLength="200" value={datos.nombreCompleto} onChange={(e) => setDatos({ ...datos, nombreCompleto: e.target.value })} /></label><label>DPI - CUI *<input required inputMode="numeric" pattern="[0-9]{13}" minLength="13" maxLength="13" title="Ingresa exactamente 13 números." value={datos.dpi} onChange={(e) => setDatos({ ...datos, dpi: e.target.value.replace(/\D/g, "").slice(0, 13) })} /></label><label>Teléfono *<input type="tel" required inputMode="numeric" pattern="[0-9]{8}" minLength="8" maxLength="8" title="Ingresa exactamente 8 números." value={datos.telefono} onChange={(e) => setDatos({ ...datos, telefono: e.target.value.replace(/\D/g, "").slice(0, 8) })} /></label><label>Correo electrónico *<input type="email" required maxLength="254" value={datos.correo} onChange={(e) => setDatos({ ...datos, correo: e.target.value })} /></label><label>¿Eres representante legal de una institución? *<select value={String(datos.representanteLegal)} onChange={(e) => setDatos({ ...datos, representanteLegal: e.target.value === "true" })}><option value="false">No</option><option value="true">Sí</option></select></label>{datos.representanteLegal && <label>Institución *<input required maxLength="200" value={datos.institucion} onChange={(e) => setDatos({ ...datos, institucion: e.target.value })} /></label>}<div className="acciones-formulario-solicitud campo-ancho"><button disabled={guardando}>Guardar y siguiente</button></div></form></div>;
 }
 
 function SelectorTipo({ seleccionar, volver }) {

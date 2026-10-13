@@ -46,7 +46,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ServicioPortalPublico {
 
     private static final Set<String> ESTADOS_EVENTO_PUBLICOS = Set.of(
-            "PUBLICADO", "CERRADO", "CANCELADO", "FINALIZADO");
+            "PUBLICADO", "CERRADO", "FINALIZADO");
 
     private final RepositorioPublicacion repositorioPublicacion;
     private final RepositorioCategoriaPublicacion repositorioCategoriaPublicacion;
@@ -184,7 +184,9 @@ public class ServicioPortalPublico {
                                 evento.obtenerIdEvento())
                         .stream()
                         .map(imagen -> convertirImagenEvento(evento, imagen))
-                        .toList());
+                        .toList(), evento.esCursoContinuo(),
+                evento.obtenerClaveFormularioInscripcion() == null ? null : "/api/v1/publico/eventos/" + evento.obtenerIdentificadorUrl() + "/formulario-inscripcion",
+                evento.obtenerNombreFormularioInscripcion());
     }
 
     @Transactional(readOnly = true)

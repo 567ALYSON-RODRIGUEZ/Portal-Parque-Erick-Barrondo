@@ -80,6 +80,7 @@ class SeguridadApiPruebas {
 
     @Test
     void aceptaElRegistroPublicoConCsrf() throws Exception {
+        when(servicioRegistroCuenta.registrar(any())).thenReturn(true);
         clienteApi.perform(post("/api/v1/autenticacion/registro")
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -132,6 +133,7 @@ class SeguridadApiPruebas {
         clienteApi.perform(get("/api/v1/autenticacion/csrf").secure(true))
                 .andExpect(header().string("Content-Security-Policy", Matchers.allOf(
                         Matchers.containsString("script-src 'self'"),
+                        Matchers.containsString("worker-src 'self' blob:"),
                         Matchers.containsString("https://tiles.openfreemap.org"),
                         Matchers.containsString("frame-ancestors 'none'"))))
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"))
